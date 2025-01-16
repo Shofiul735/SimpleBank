@@ -4,70 +4,89 @@ import (
 	"log"
 	"net/http"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
-func Logger(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// Logger middleware for Gin
+func Logger() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
+
+		// Process request
+		c.Next()
+
+		// Log after request is processed
 		log.Printf(
 			"%s %s %s",
-			r.Method,
-			r.RequestURI,
+			c.Request.Method,
+			c.Request.RequestURI,
 			time.Since(start),
 		)
-	})
-}
-func Chain(middlewares ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
-	return func(final http.Handler) http.Handler {
-		for i := len(middlewares) - 1; i >= 0; i-- {
-			final = middlewares[i](final)
-		}
-		return final
 	}
 }
 
-// Recoverer middleware
-func Recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// Recoverer middleware for Gin
+func Recoverer() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
+				c.AbortWithStatus(http.StatusInternalServerError)
 			}
 		}()
-		next.ServeHTTP(w, r)
-	})
+		c.Next()
+	}
 }
 
-// CORS middleware
-func CORS(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+// CORS middleware for Gin
+func CORS() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(http.StatusOK)
 			return
 		}
 
-		next.ServeHTTP(w, r)
-	})
+		c.Next()
+	}
 }
 
-// Authentication middleware
-func Authentication(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// Authentication middleware for Gin
+func Authentication() gin.HandlerFunc {
+	return func(c *gin.Context) {
 		// Get token from Authorization header
-		token := r.Header.Get("Authorization")
+		token := c.GetHeader("Authorization")
 		if token == "" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error": "Unauthorized",
+			})
 			return
 		}
 
 		// TODO: Implement proper token validation
 		// This is just a placeholder. You should implement proper JWT validation
 
-		next.ServeHTTP(w, r)
-	})
+		c.Next()
+	}
+}
+
+// ChainGin chains multiple Gin middleware functions together
+func ChainGin(middlewares ...gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Create a new slice to hold the middleware chain
+		chain := make([]gin.HandlerFunc, len(middlewares))
+		copy(chain, middlewares)
+
+		// Execute each middleware in the chain
+		for _, middleware := range chain {
+			middleware(c)
+			// If the request was aborted in a middleware, stop the chain
+			if c.IsAborted() {
+				return
+			}
+		}
+	}
 }

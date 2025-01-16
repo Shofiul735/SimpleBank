@@ -1,13 +1,11 @@
 package handlers
 
 import (
-	"encoding/json"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/shofiul735/simple_bank/internal/core/domain"
 	"github.com/shofiul735/simple_bank/internal/core/services"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/render"
 )
 
 type UserHandler struct {
@@ -20,65 +18,54 @@ func NewUserHandler(service *services.UserService) *UserHandler {
 	}
 }
 
-// Routes sets up the user routes
-func (h *UserHandler) Routes() chi.Router {
-	r := chi.NewRouter()
-	r.Post("/", h.createUser)     // POST /api/users
-	r.Get("/{userID}", h.getUser) // GET /api/users/{userID}
-	return r
+// RegisterRoutes sets up the user routes
+func (h *UserHandler) RegisterRoutes(r *gin.RouterGroup) {
+	r.POST("/", h.createUser)    // POST /api/users
+	r.GET("/:userID", h.getUser) // GET /api/users/:userID
 }
 
-// CreateUser handles user creation
-func (h *UserHandler) createUser(w http.ResponseWriter, r *http.Request) {
+// createUser handles user creation
+func (h *UserHandler) createUser(c *gin.Context) {
 	var user domain.User
-	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
-		render.Status(r, http.StatusBadRequest)
-		render.JSON(w, r, map[string]string{"error": "Invalid request body"})
+	if err := c.ShouldBindJSON(&user); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
 		return
 	}
-	defer r.Body.Close()
 
-	err := h.service.CreateUser(r.Context(), &user)
+	err := h.service.CreateUser(c.Request.Context(), &user)
 	if err != nil {
 		switch err {
 		case services.ErrInvalidInput:
-			render.Status(r, http.StatusBadRequest)
-			render.JSON(w, r, map[string]string{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		case services.ErrDuplicateEmail:
-			render.Status(r, http.StatusConflict)
-			render.JSON(w, r, map[string]string{"error": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		default:
-			render.Status(r, http.StatusInternalServerError)
-			render.JSON(w, r, map[string]string{"error": "Internal server error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		}
 		return
 	}
 
-	render.Status(r, http.StatusCreated)
-	render.JSON(w, r, user)
+	c.JSON(http.StatusCreated, user)
 }
 
-// GetUser handles fetching a single user
-func (h *UserHandler) getUser(w http.ResponseWriter, r *http.Request) {
-	userID := chi.URLParam(r, "userID")
+// getUser handles fetching a single user
+func (h *UserHandler) getUser(c *gin.Context) {
+	userID := c.Param("userID")
 	if userID == "" {
-		render.Status(r, http.StatusBadRequest)
-		render.JSON(w, r, map[string]string{"error": "User ID is required"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "User ID is required"})
 		return
 	}
 
-	user, err := h.service.GetUser(r.Context(), userID)
+	user, err := h.service.GetUser(c.Request.Context(), userID)
 	if err != nil {
 		switch err {
 		case services.ErrUserNotFound:
-			render.Status(r, http.StatusNotFound)
-			render.JSON(w, r, map[string]string{"error": "User not found"})
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		default:
-			render.Status(r, http.StatusInternalServerError)
-			render.JSON(w, r, map[string]string{"error": "Internal server error"})
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		}
 		return
 	}
 
-	render.JSON(w, r, user)
+	c.JSON(http.StatusOK, user)
 }

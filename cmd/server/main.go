@@ -9,8 +9,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-chi/chi/middleware"
-	"github.com/go-chi/chi/v5"
+	"github.com/gin-gonic/gin"
 
 	"github.com/shofiul735/simple_bank/configs"
 	"github.com/shofiul735/simple_bank/internal/core/services"
@@ -76,26 +75,23 @@ func main() {
 	userHandler := handlers.NewUserHandler(userService)
 	//productHandler := handlers.NewProductHandler(productService)
 
-	// Create Chi router
-	r := chi.NewRouter()
+	// Create Gin router
+	gin.SetMode(gin.ReleaseMode) // Set to release mode
+	r := gin.New()
 
 	// Middleware stack
-	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second)) // maximum duration of 60 seconds for all HTTP requests handled by your server
-	r.Use(custommw.CORS)
-	r.Use(custommw.Authentication)
+	r.Use(gin.Logger())
+	r.Use(gin.Recovery())
+	r.Use(custommw.CORS())           // Make sure this middleware is adapted for Gin
+	r.Use(custommw.Authentication()) // Make sure this middleware is adapted for Gin
 
 	// API routes
-	r.Route("/api", func(r chi.Router) {
-		// Users endpoints
-		r.Group(func(r chi.Router) {
-			r.Use(middleware.Timeout(200 * time.Second)) // route specific middleware
-			r.Mount("/users", userHandler.Routes())
-		})
-	})
+	api := r.Group("/api")
+	{
+		// Users endpoints with timeout middleware
+		users := api.Group("/users", timeoutMiddleware(200*time.Second))
+		userHandler.RegisterRoutes(users) // Adapt the handler for Gin
+	}
 
 	// Create server
 	srv := &http.Server{
@@ -145,4 +141,28 @@ func main() {
 	// Wait for server context to be stopped
 	<-serverCtx.Done()
 	logger.Println("Server stopped gracefully")
+}
+
+// timeoutMiddleware creates a Gin middleware that implements a timeout
+func timeoutMiddleware(timeout time.Duration) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
+		defer cancel()
+
+		c.Request = c.Request.WithContext(ctx)
+
+		done := make(chan struct{}, 1)
+		go func() {
+			c.Next()
+			done <- struct{}{}
+		}()
+
+		select {
+		case <-done:
+			return
+		case <-ctx.Done():
+			c.AbortWithStatus(http.StatusRequestTimeout)
+			return
+		}
+	}
 }
